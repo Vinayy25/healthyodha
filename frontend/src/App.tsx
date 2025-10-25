@@ -217,11 +217,20 @@ NEVER:
 - More questions can be asked by the doctor later
 - Your job is QUICK screening, not comprehensive workup
 
+## CRITICAL - AUTOMATIC SUMMARY
+**WHEN YOU DECIDE THE CONVERSATION IS COMPLETE (after 5-8 questions):**
+- You MUST automatically call the generate_medical_summary tool
+- Do NOT wait for user to click end
+- Do NOT ask user if they want to end
+- Simply call the tool when you have enough information
+- This is NOT optional - ALWAYS do this
+
 ## Important
 - Be concise and direct
 - Use tool results to guide questions
 - Patient experience is quick check-in, not long interview
 - Efficiency is key - 5 minutes max
+- Remember: AUTOMATICALLY call generate_medical_summary when ending, don't wait
 
 Start by greeting warmly and asking their main concern.`,
         tools: [getRelevantQuestions, generateMedicalSummary],
@@ -271,47 +280,54 @@ Start by greeting warmly and asking their main concern.`,
         console.log("📜 [HISTORY] Conversation history updated");
 
         // Process history to display transcripts
-        // Only add new items, use itemId as unique key
+        // Use stronger deduplication based on content hash
         setTranscripts((prev) => {
-          const existingIds = new Set(
-            prev.map((t) => `${t.role}-${t.timestamp}`)
-          );
+          const contentHashes = new Set(prev.map((t) => `${t.role}:${t.text}`));
           const newTranscripts: TranscriptItem[] = [...prev];
           let questionsAdded = 0;
 
           history.forEach((item) => {
             if (item.type === "message") {
               const role = item.role === "user" ? "user" : "assistant";
-              const itemId = item.itemId || `${role}-${Date.now()}`;
-              const uniqueKey = `${role}-${itemId}`;
-
-              // Skip if already processed
-              if (existingIds.has(uniqueKey)) {
-                return;
-              }
 
               // Handle both text and audio content
+              // IMPORTANT: Only take FIRST content item, not concatenate
               let text = "";
               if (item.content && Array.isArray(item.content)) {
-                item.content.forEach((contentItem: any) => {
-                  if (contentItem.type === "input_text") {
-                    text = contentItem.text;
-                  } else if (contentItem.type === "output_text") {
-                    text = contentItem.text;
-                  } else if (
-                    contentItem.type === "input_audio" &&
-                    contentItem.transcript
-                  ) {
-                    text = contentItem.transcript;
-                  }
-                });
+                const firstContent = item.content[0];
+                if (!firstContent) return;
+
+                if (firstContent.type === "input_text") {
+                  text = firstContent.text;
+                } else if (firstContent.type === "output_text") {
+                  text = firstContent.text;
+                } else if (
+                  firstContent.type === "input_audio" &&
+                  firstContent.transcript
+                ) {
+                  text = firstContent.transcript;
+                }
               }
 
-              // Only add if we have text content
+              // Only add if we have text content and it's not a duplicate
               if (text && text.trim().length > 0) {
+                const cleanText = text.trim();
+                const contentHash = `${role}:${cleanText}`;
+
+                // Skip if this exact message already exists
+                if (contentHashes.has(contentHash)) {
+                  console.log(
+                    `⏭️ [HISTORY] Skipping duplicate: ${role} - ${cleanText.substring(
+                      0,
+                      50
+                    )}...`
+                  );
+                  return;
+                }
+
                 newTranscripts.push({
                   role: role as "user" | "assistant",
-                  text: text.trim(),
+                  text: cleanText,
                   timestamp: Date.now(),
                 });
 
@@ -320,13 +336,20 @@ Start by greeting warmly and asking their main concern.`,
                   questionsAdded++;
                 }
 
-                existingIds.add(uniqueKey);
+                contentHashes.add(contentHash);
+                console.log(
+                  `✅ [HISTORY] Added message: ${role} - ${cleanText.substring(
+                    0,
+                    50
+                  )}...`
+                );
               }
             }
           });
 
           // Update question count if new AI messages were added
           if (questionsAdded > 0) {
+            console.log(`📊 [HISTORY] Added ${questionsAdded} new AI messages`);
             setQuestionCount((prev) => prev + questionsAdded);
           }
 
