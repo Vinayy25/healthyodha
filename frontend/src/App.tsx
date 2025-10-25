@@ -138,12 +138,18 @@ function App() {
         return {
           summary: data.summary,
           success: true,
+          message:
+            "Thank you for sharing all this information. Your health summary has been generated and is ready for your doctor. You can review it below.",
         };
       } catch (error) {
         console.error("❌ [SUMMARY ERROR]:", error);
+        // Don't expose technical errors - ask user to click the button
+        // This is a graceful fallback, not an error to show to user
         return {
-          error: `Failed to generate summary: ${error}`,
           success: false,
+          message:
+            "Thank you for the information. Please click the 'End Interview' button below to complete and generate your health summary.",
+          fallback: true,
         };
       } finally {
         setGeneratingSummary(false);
@@ -224,6 +230,12 @@ NEVER:
 - Do NOT ask user if they want to end
 - Simply call the tool when you have enough information
 - This is NOT optional - ALWAYS do this
+
+## If Summary Tool Returns a Message
+- If tool returns success = true: Acknowledge and thank the user, interview is complete
+- If tool returns fallback = true: Politely thank the user and ask them to click the "✋ End Interview" button
+- NEVER show technical errors to the user
+- ALWAYS be warm, professional, and supportive
 
 ## Important
 - Be concise and direct
