@@ -10,6 +10,11 @@ app.use(cors());
 app.use(express.json());
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || "http://localhost:3000";
+
+console.log("📋 Configuration:");
+console.log(`   OPENAI_API_KEY: ${OPENAI_API_KEY ? "✅ Set" : "❌ Missing"}`);
+console.log(`   RAG_SERVICE_URL: ${RAG_SERVICE_URL}`);
 
 if (!OPENAI_API_KEY) {
   console.error("❌ OPENAI_API_KEY not found in environment variables");
@@ -42,7 +47,12 @@ Guidelines:
 - Maintain patient privacy and confidentiality
 - If the patient seems to be in distress, advise them to seek immediate medical attention
 
-When additional context from the medical knowledge base is provided, use it to guide your questions and ensure thorough history-taking following evidence-based frameworks.
+IMPORTANT - RAG-ENHANCED FOLLOW-UP QUESTIONS:
+- After the patient's first response, EVERY follow-up question should be based on the medical knowledge base provided in the context.
+- The context provides evidence-based question frameworks from medical handbooks.
+- Use the provided context to ask optimal, medically appropriate follow-up questions.
+- Structure your questions following the frameworks: Onset/Duration → Quality/Severity → Aggravating/Relieving → Associated Symptoms → Red Flags.
+- Reference the "Possible Answers" in the context to understand what you're listening for.
 
 Start by greeting the patient warmly and asking how you can help them today.`,
         }),
@@ -77,7 +87,7 @@ app.post("/rag", async (req, res) => {
     console.log(`🔍 RAG Query: "${query}"`);
 
     // Call the Python RAG service
-    const ragResponse = await fetch("http://localhost:3000/rag", {
+    const ragResponse = await fetch(`${RAG_SERVICE_URL}/rag`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, k }),
@@ -115,7 +125,7 @@ app.post("/rag", async (req, res) => {
 // Check if RAG service is available
 app.get("/rag/health", async (req, res) => {
   try {
-    const healthResponse = await fetch("http://localhost:3000/health");
+    const healthResponse = await fetch(`${RAG_SERVICE_URL}/health`);
     const data = await healthResponse.json();
     res.json({ status: "connected", ...data });
   } catch (error) {
