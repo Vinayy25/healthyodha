@@ -57,7 +57,7 @@ function App() {
       console.log(`🔍 [TOOL] Retrieving medical framework for: "${symptom}"`);
       setRagStatus("Fetching medical framework from backend...");
       try {
-        const response = await fetch("http://15.206.157.127:3001/rag", {
+        const response = await fetch("https://healthyodha-y754.vercel.app/rag", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ query: symptom, k: 2 }),
@@ -119,7 +119,7 @@ function App() {
       );
       setGeneratingSummary(true);
       try {
-        const response = await fetch("http://15.206.157.127:3001/summary", {
+        const response = await fetch("https://healthyodha-y754.vercel.app/summary", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ transcripts }),
@@ -250,7 +250,7 @@ Start by greeting warmly and asking their main concern.`,
 
       console.log("🔑 [AUTH] Requesting ephemeral token from backend...");
       setConnectionStatus("Requesting session token from backend...");
-      const tokenResponse = await fetch("http://15.206.157.127:3001/session");
+      const tokenResponse = await fetch("https://healthyodha-y754.vercel.app/session");
       if (!tokenResponse.ok) {
         throw new Error("Failed to get session token");
       }
@@ -439,7 +439,7 @@ Start by greeting warmly and asking their main concern.`,
       if (!medicalSummary && transcripts.length > 0) {
         console.log("📝 [END] Auto-generating medical summary...");
         try {
-          const response = await fetch("http://15.206.157.127:3001/summary", {
+          const response = await fetch("https://healthyodha-y754.vercel.app/summary", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ transcripts }),
