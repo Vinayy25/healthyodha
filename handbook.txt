@@ -1,0 +1,306 @@
+HealthYoda History-Taking Handbook
+A comprehensive system-wise history framework with tailored questions and possible answers.
+Table of Contents
+Cardiac System .................................................. [page]
+Respiratory System .................................................. [page]
+GI System .................................................. [page]
+Neurologic System .................................................. [page]
+Musculoskeletal System .................................................. [page]
+GU System .................................................. [page]
+Dermatologic System .................................................. [page]
+General Endocrine ID System .................................................. [page]
+ENT Eye System .................................................. [page]
+HealthYoda History Framework – Cardiac System
+Chest Pain
+Chief Complaint
+Q: What brings you in today?
+Onset/Duration
+Q: Onset/Duration related question(s)
+Possible Answers:
+- Sudden onset (minutes)
+- Gradual over hours
+- Intermittent episodes
+- Chronic (>1 month)
+Quality/Severity
+Q: Quality/Severity related question(s)
+Possible Answers:
+- Pressure/tightness
+- Burning/indigestion-like
+- Sharp/stabbing
+- Crushing
+Aggravating/Relieving
+Q: Aggravating/Relieving related question(s)
+Possible Answers:
+- Worse with exertion
+- Worse lying down
+- Worse after meals
+- Relieved by rest/NTG
+Associated Symptoms
+Q: Associated Symptoms related question(s)
+Possible Answers:
+- Sweating
+- Nausea/vomiting
+- Palpitations
+- Shortness of breath
+Red Flags
+Q: Red Flags related question(s)
+Possible Answers:
+- Syncope
+- Shock
+- Tearing pain radiating to back
+- Severe ongoing pain
+ROS
+Q: ROS related question(s)
+Possible Answers:
+- Fever
+- Cough
+- Hemoptysis
+- Indigestion
+Context
+Q: Context related question(s)
+Possible Answers:
+- History of CAD/MI
+- Hypertension
+- Hyperlipidemia
+- Smoking
+- Family history of early CAD
+Wrap-up
+Q: Anything else? What worries you most?
+Palpitations
+Chief Complaint
+Q: What brings you in today?
+Onset/Duration
+Q: Onset/Duration related question(s)
+Possible Answers:
+- Sudden episodes
+- Gradual onset
+- Intermittent
+- Chronic
+Quality/Severity
+Q: Quality/Severity related question(s)
+Possible Answers:
+- Rapid heartbeat
+- Irregular beats
+- Fluttering sensation
+- Pounding
+Aggravating/Relieving
+Q: Aggravating/Relieving related question(s)
+Possible Answers:
+- Triggered by exertion
+- Triggered by caffeine/stimulants
+- Triggered by stress
+- Relieved by rest
+Associated Symptoms
+Q: Associated Symptoms related question(s)
+Possible Answers:
+- Chest pain
+- Shortness of breath
+- Dizziness
+- Anxiety
+Red Flags
+Q: Red Flags related question(s)
+Possible Answers:
+- Syncope
+- Sustained tachycardia
+- Family history of sudden cardiac death
+ROS
+Q: ROS related question(s)
+Possible Answers:
+- Thyroid symptoms
+- Fever/infection
+- Stimulant use
+Context
+Q: Context related question(s)
+Possible Answers:
+- Atrial fibrillation
+- SVT
+- Thyroid disease
+- Alcohol/binge drinking
+Wrap-up
+Q: Anything else? What worries you most?
+Syncope
+Chief Complaint
+Q: What brings you in today?
+Onset/Duration
+Q: Onset/Duration related question(s)
+Possible Answers:
+- Sudden collapse
+- Brief loss of consciousness
+- Prodrome (dizziness, nausea)
+Quality/Severity
+Q: Quality/Severity related question(s)
+Possible Answers:
+- Single episode
+- Recurrent
+- Prolonged LOC
+Aggravating/Relieving
+Q: Aggravating/Relieving related question(s)
+Possible Answers:
+- Triggered by standing
+- Triggered by exertion
+- Triggered by emotional stress
+Associated Symptoms
+Q: Associated Symptoms related question(s)
+Possible Answers:
+- Palpitations
+- Chest pain
+- Seizure-like movements
+Red Flags
+Q: Red Flags related question(s)
+Possible Answers:
+- Exertional syncope
+- Family history of sudden death
+- Prolonged confusion after event
+ROS
+Q: ROS related question(s)
+Possible Answers:
+- Neurologic deficits
+- Seizure symptoms
+- Cardiac history
+Context
+Q: Context related question(s)
+Possible Answers:
+- Structural heart disease
+- Arrhythmia history
+- Medications (antihypertensives, diuretics)
+Wrap-up
+Q: Anything else? What worries you most?
+Edema
+Chief Complaint
+Q: What brings you in today?
+Onset/Duration
+Q: Onset/Duration related question(s)
+Possible Answers:
+- Acute (days)
+- Chronic (weeks/months)
+- Intermittent swelling
+Quality/Severity
+Q: Quality/Severity related question(s)
+Possible Answers:
+- Unilateral
+- Bilateral
+- Pitting
+- Non-pitting
+Aggravating/Relieving
+Q: Aggravating/Relieving related question(s)
+Possible Answers:
+- Worse in evenings
+- Improves with elevation
+- Worse with standing
+Associated Symptoms
+Q: Associated Symptoms related question(s)
+Possible Answers:
+- Shortness of breath
+- Weight gain
+- Leg pain
+Red Flags
+Q: Red Flags related question(s)
+Possible Answers:
+- Acute unilateral swelling with pain (DVT)
+- Rapid weight gain
+- Associated chest pain
+ROS
+Q: ROS related question(s)
+Possible Answers:
+- Dyspnea on exertion
+- Orthopnea
+- Cough
+Context
+Q: Context related question(s)
+Possible Answers:
+- Heart failure
+- Kidney disease
+- Liver disease
+- Venous insufficiency
+Wrap-up
+Q: Anything else? What worries you most?
+Orthopnea/PND
+Chief Complaint
+Q: What brings you in today?
+Onset/Duration
+Q: Onset/Duration related question(s)
+Possible Answers:
+- Recent onset
+- Chronic
+- Progressive
+Quality/Severity
+Q: Quality/Severity related question(s)
+Possible Answers:
+- Mild (extra pillow)
+- Severe (cannot lie flat)
+- PND (waking up gasping)
+Aggravating/Relieving
+Q: Aggravating/Relieving related question(s)
+Possible Answers:
+- Worse lying flat
+- Improves with pillows
+- Relieved by sitting up
+Associated Symptoms
+Q: Associated Symptoms related question(s)
+Possible Answers:
+- Cough
+- Leg swelling
+- Fatigue
+Red Flags
+Q: Red Flags related question(s)
+Possible Answers:
+- Sudden severe PND
+- Resting hypoxia
+ROS
+Q: ROS related question(s)
+Possible Answers:
+- Nocturia
+- Palpitations
+- Weight gain
+Context
+Q: Context related question(s)
+Possible Answers:
+- Heart failure
+- Valvular disease
+- Obesity/OSA
+Wrap-up
+Q: Anything else? What worries you most?
+Claudication
+Chief Complaint
+Q: What brings you in today?
+Onset/Duration
+Q: Onset/Duration related question(s)
+Possible Answers:
+- Gradual with walking
+- Progressive
+Quality/Severity
+Q: Quality/Severity related question(s)
+Possible Answers:
+- Cramping
+- Aching
+- Tightness
+Aggravating/Relieving
+Q: Aggravating/Relieving related question(s)
+Possible Answers:
+- Worse with exertion
+- Relieved by rest
+- Reproducible distance
+Associated Symptoms
+Q: Associated Symptoms related question(s)
+Possible Answers:
+- Cold feet
+- Skin changes
+- Non-healing wounds
+Red Flags
+Q: Red Flags related question(s)
+Possible Answers:
+- Rest pain
+- Ulceration/gangrene
+ROS
+Q: ROS related question(s)
+Possible Answers:
+- Diabetes symptoms
+- Smoking history
+Context
+Q: Context related question(s)
+Possible Answers:
+- Peripheral artery disease
+- Atherosclerosis
+- Diabetes
+Wrap-up
+Q: Anything else? What worries you most?
