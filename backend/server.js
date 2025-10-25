@@ -6,7 +6,15 @@ import dotenv from "dotenv";
 dotenv.config({ path: "../.env" });
 
 const app = express();
-app.use(cors());
+
+// CORS configuration - allow all origins for now
+app.use(cors({
+  origin: '*', // Allow all origins
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
+
 app.use(express.json());
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
