@@ -66,11 +66,53 @@ Start by greeting the patient warmly and asking how you can help them today.`;
 }
 
 // Regular session endpoint (initial greeting only)
-app.post("/session", async (req, res) => {
+app.get("/session", async (req, res) => {
   try {
-    const instructions = buildSystemInstructions();
+    console.log("🔑 [SESSION] Requesting ephemeral token from OpenAI");
 
-    console.log("📝 Creating session with initial instructions");
+    const response = await fetch(
+      "https://api.openai.com/v1/realtime/client_secrets",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          session: {
+            type: "realtime",
+            model: "gpt-realtime",
+          },
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error("❌ [SESSION ERROR]:", error);
+      return res
+        .status(response.status)
+        .json({ error: "Failed to get session token" });
+    }
+
+    const data = await response.json();
+    console.log("✅ [SESSION] Ephemeral token received");
+
+    res.json({
+      client_secret: {
+        value: data.value,
+      },
+    });
+  } catch (error) {
+    console.error("❌ [SESSION ERROR]:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// NEW: Ephemeral token endpoint for Agents SDK
+app.get("/client-secret", async (req, res) => {
+  try {
+    console.log("🔑 Generating ephemeral client secret for Agents SDK");
 
     const response = await fetch(
       "https://api.openai.com/v1/realtime/sessions",
@@ -82,8 +124,6 @@ app.post("/session", async (req, res) => {
         },
         body: JSON.stringify({
           model: "gpt-4o-realtime-preview-2024-10-01",
-          voice: "alloy",
-          instructions: instructions,
         }),
       }
     );
@@ -93,19 +133,14 @@ app.post("/session", async (req, res) => {
       console.error("OpenAI API Error:", error);
       return res
         .status(response.status)
-        .json({ error: "Failed to create session" });
+        .json({ error: "Failed to get client secret" });
     }
 
     const data = await response.json();
-
-    // Store empty context for this session
-    conversationContexts.set(data.client_secret.client_secret, {
-      ragContext: null,
-      transcript: [],
+    console.log("✅ Ephemeral token generated for Agents SDK");
+    res.json({
+      client_secret: data.client_secret,
     });
-
-    console.log("✅ Session created:", data.client_secret.client_secret);
-    res.json(data);
   } catch (error) {
     console.error("Server error:", error);
     res.status(500).json({ error: "Internal server error" });

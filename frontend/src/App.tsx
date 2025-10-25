@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
-import axios from "axios";
+import { RealtimeAgent, tool, RealtimeSession } from "@openai/agents/realtime";
+import { z } from "zod";
 import "./App.css";
 
 interface TranscriptItem {
@@ -8,15 +9,8 @@ interface TranscriptItem {
   timestamp: number;
 }
 
-interface RAGContext {
-  context: string;
-  sources: string[];
-  num_chunks: number;
-}
-
 interface MedicalSummary {
   summary: string;
-  transcripts_count: number;
   generated_at: string;
 }
 
@@ -26,516 +20,627 @@ function App() {
   const [error, setError] = useState<string>("");
   const [transcripts, setTranscripts] = useState<TranscriptItem[]>([]);
   const [isListening, setIsListening] = useState(false);
-  const [ragContext, setRagContext] = useState<RAGContext | null>(null);
-  const [ragLoading, setRagLoading] = useState(false);
-  const [showRagPanel, setShowRagPanel] = useState(true); // Always show RAG
   const [medicalSummary, setMedicalSummary] = useState<MedicalSummary | null>(
     null
   );
   const [generatingSummary, setGeneratingSummary] = useState(false);
   const [conversationEnded, setConversationEnded] = useState(false);
 
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const dataChannelRef = useRef<RTCDataChannel | null>(null);
-  const lastRagQuery = useRef<string>("");
-  const ragDebounceTimer = useRef<NodeJS.Timeout>();
+  // NEW: Detailed status tracking
+  const [connectionStatus, setConnectionStatus] = useState<string>("Idle");
+  const [ragStatus, setRagStatus] = useState<string>("");
+  const [ragDetails, setRagDetails] = useState<{
+    symptom: string;
+    chunks: number;
+    sources: string[];
+  } | null>(null);
+  const [questionCount, setQuestionCount] = useState(0);
 
-  // Keywords that suggest conversation is ending
-  const END_KEYWORDS = [
-    "thank you",
-    "goodbye",
-    "thanks",
-    "that's all",
-    "i'm done",
-    "that's it",
-  ];
-  const isConversationEnding = (text: string): boolean => {
-    return END_KEYWORDS.some((keyword) => text.toLowerCase().includes(keyword));
-  };
+  const sessionRef = useRef<RealtimeSession | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
 
-  const startSession = async () => {
+  // Define RAG retrieval tool - calls backend which forwards to AWS RAG
+  const getRelevantQuestions = tool({
+    name: "get_relevant_questions",
+    description:
+      "Retrieve relevant medical history questions from the handbook based on patient symptoms. This tool queries the medical knowledge base to get evidence-based assessment frameworks.",
+    parameters: z.object({
+      symptom: z
+        .string()
+        .describe(
+          "The patient's symptom or chief complaint to search in the medical handbook"
+        ),
+    }),
+    async execute({ symptom }) {
+      console.log(`🔍 [TOOL] Retrieving medical framework for: "${symptom}"`);
+      setRagStatus("Fetching medical framework from backend...");
+      try {
+        const response = await fetch("http://localhost:3001/rag", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: symptom, k: 2 }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`RAG service error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log(
+          `✅ [RAG] Retrieved ${data.num_chunks} chunks from ${
+            data.sources.length
+          } sources: ${data.sources.join(", ")}`
+        );
+
+        // Update RAG details for display
+        setRagDetails({
+          symptom,
+          chunks: data.num_chunks,
+          sources: data.sources,
+        });
+        setRagStatus(
+          `✅ Retrieved ${data.num_chunks} chunks for: "${symptom}"`
+        );
+
+        return {
+          context: data.context,
+          sources: data.sources,
+          guidance: `Medical Framework Retrieved:\n\n${data.context}\n\nUse this framework to structure your follow-up questions systematically.`,
+        };
+      } catch (error) {
+        console.error("❌ [RAG ERROR]:", error);
+        setRagStatus(`❌ RAG Error: ${error}`);
+        return {
+          error: `Failed to retrieve medical framework: ${error}`,
+          fallback:
+            "Continue with standard evidence-based medical history questions focusing on onset, duration, severity, and associated symptoms.",
+        };
+      }
+    },
+  });
+
+  // Define summary generation tool
+  const generateMedicalSummary = tool({
+    name: "generate_medical_summary",
+    description:
+      "Generate a structured medical summary from the conversation for the doctor. Call this when you have gathered sufficient information.",
+    parameters: z.object({
+      summary_reason: z
+        .string()
+        .describe(
+          "Why you are ending the conversation and generating a summary"
+        ),
+    }),
+    async execute({ summary_reason }) {
+      console.log(
+        `📝 [TOOL] Generating medical summary. Reason: ${summary_reason}`
+      );
+      setGeneratingSummary(true);
+      try {
+        const response = await fetch("http://localhost:3001/summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcripts }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Summary service error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        setMedicalSummary({
+          summary: data.summary,
+          generated_at: data.generated_at,
+        });
+        console.log("✅ [SUMMARY] Medical summary generated successfully");
+        return {
+          summary: data.summary,
+          success: true,
+        };
+      } catch (error) {
+        console.error("❌ [SUMMARY ERROR]:", error);
+        return {
+          error: `Failed to generate summary: ${error}`,
+          success: false,
+        };
+      } finally {
+        setGeneratingSummary(false);
+      }
+    },
+  });
+
+  // Initialize the voice agent with tools
+  const initializeAgent = async () => {
     try {
       setConnecting(true);
       setError("");
+      setTranscripts([]);
+      setMedicalSummary(null);
+      setConversationEnded(false);
+      setConnectionStatus("Initializing agent...");
+      setQuestionCount(0);
+      setRagStatus("");
+      setRagDetails(null);
 
-      // Get Realtime session credentials from backend
-      console.log("📡 Requesting session from backend...");
-      const { data } = await axios.post("http://localhost:3001/session");
-      console.log("✅ Session created:", data);
+      console.log("🚀 [INIT] Starting HealthYoda Speech-to-Speech Voice Agent");
+      setConnectionStatus("Creating AI agent...");
 
-      // Create peer connection
-      const pc = new RTCPeerConnection();
-      peerConnectionRef.current = pc;
+      // Create the agent with tools
+      const agent = new RealtimeAgent({
+        name: "HealthYoda Medical Assistant",
+        instructions: `You are HealthYoda, a highly efficient medical intake assistant. Your role is to gather essential patient information quickly and systematically.
 
-      // Set up audio element for playback
-      const audioEl = document.createElement("audio");
-      audioEl.autoplay = true;
-      document.body.appendChild(audioEl);
+## CRITICAL REQUIREMENT - TOOL CALLING
+**You MUST call the get_relevant_questions tool AFTER EVERY patient response.**
+- After user speaks, immediately acknowledge and call get_relevant_questions with their symptom
+- Use the returned framework to ask your next question
+- Do NOT skip tool calls. Tools are mandatory for every interaction.
+- Tools help you ask evidence-based, optimal questions
 
-      pc.ontrack = (e) => {
-        console.log("🎵 Received audio track");
-        audioEl.srcObject = e.streams[0];
-      };
+## Conversation Structure
+1. Initial Greeting: Ask "What brings you in today?" / "What's bothering you?"
+2. After First Answer: Call tool with their symptom → Get framework → Ask follow-up
+3. Iterate 4-5 times MAXIMUM asking brief follow-ups based on tool guidance
+4. After 5-6 total exchanges, you have enough information
+5. End by calling generate_medical_summary
 
-      // Handle connection state changes
-      pc.onconnectionstatechange = () => {
-        console.log("Connection state:", pc.connectionState);
-        if (pc.connectionState === "connected") {
-          setConnected(true);
-          setConnecting(false);
-          setIsListening(true);
-        } else if (
-          pc.connectionState === "failed" ||
-          pc.connectionState === "disconnected"
-        ) {
-          setConnected(false);
-          setIsListening(false);
-          setError("Connection lost. Please refresh to reconnect.");
-        }
-      };
+## Interview Flow (FAST - 5-8 questions total)
+- Q1: Chief complaint (chief_complaint)
+- Q2: Duration/onset (after tool call)
+- Q3: Severity/quality (after tool call)
+- Q4: Associated symptoms (after tool call)
+- Q5: Red flags/impact (after tool call)
+- Q6: Medical history if relevant (after tool call)
+- Then: Generate summary and end
 
-      // Get microphone input
-      console.log("🎤 Requesting microphone access...");
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+## Specific Instructions for Tools
+ALWAYS:
+1. Acknowledge what patient said
+2. Call get_relevant_questions tool with symptom
+3. Wait for framework
+4. Ask ONE targeted question from the framework
+5. Listen to answer
+6. Repeat steps 1-5 OR generate summary
+
+NEVER:
+- Ask multiple questions at once
+- Skip tool calls
+- Go beyond 6-8 total questions
+- Have long conversations
+
+## When to End Conversation
+- After 5-8 questions are asked
+- When you have: chief complaint, onset, severity, key associated symptoms, any red flags
+- You do NOT need complete medical history for this initial intake
+- More questions can be asked by the doctor later
+- Your job is QUICK screening, not comprehensive workup
+
+## Important
+- Be concise and direct
+- Use tool results to guide questions
+- Patient experience is quick check-in, not long interview
+- Efficiency is key - 5 minutes max
+
+Start by greeting warmly and asking their main concern.`,
+        tools: [getRelevantQuestions, generateMedicalSummary],
       });
 
-      console.log("✅ Microphone access granted");
-      for (const track of stream.getTracks()) {
-        pc.addTrack(track, stream);
+      console.log("🔑 [AUTH] Requesting ephemeral token from backend...");
+      setConnectionStatus("Requesting session token from backend...");
+      const tokenResponse = await fetch("http://localhost:3001/session");
+      if (!tokenResponse.ok) {
+        throw new Error("Failed to get session token");
+      }
+      const { client_secret } = await tokenResponse.json();
+      setConnectionStatus("Token received. Creating WebRTC connection...");
+
+      console.log("📡 [CONNECTION] Creating RealtimeSession...");
+      const session = new RealtimeSession(agent, {
+        model: "gpt-realtime",
+      });
+
+      console.log("🔗 [WEBRTC] Connecting to OpenAI Realtime API...");
+      setConnectionStatus("Connecting to OpenAI via WebRTC...");
+      await session.connect({
+        apiKey: client_secret.value,
+      });
+
+      sessionRef.current = session;
+      console.log("✅ [CONNECTED] Session established successfully");
+      setConnectionStatus(
+        "✅ Connected! Microphone active. Ready to listen..."
+      );
+      setConnected(true);
+
+      // Setup audio playback (for WebSocket scenarios if needed)
+      const audioContext = new (window.AudioContext ||
+        (window as any).webkitAudioContext)();
+      audioContextRef.current = audioContext;
+
+      if (!audioElementRef.current) {
+        const audio = document.createElement("audio");
+        audio.autoplay = true;
+        document.body.appendChild(audio);
+        audioElementRef.current = audio;
       }
 
-      // Create data channel for events/transcripts
-      const dc = pc.createDataChannel("oai-events");
-      dataChannelRef.current = dc;
+      // Listen to conversation history updates
+      session.on("history_updated", (history) => {
+        console.log("📜 [HISTORY] Conversation history updated");
 
-      dc.onopen = () => {
-        console.log("✅ Data channel opened");
-      };
+        // Process history to display transcripts
+        // Only add new items, use itemId as unique key
+        setTranscripts((prev) => {
+          const existingIds = new Set(
+            prev.map((t) => `${t.role}-${t.timestamp}`)
+          );
+          const newTranscripts: TranscriptItem[] = [...prev];
+          let questionsAdded = 0;
 
-      dc.onmessage = (msg) => {
-        try {
-          const event = JSON.parse(msg.data);
-          console.log("📨 Received event:", event);
+          history.forEach((item) => {
+            if (item.type === "message") {
+              const role = item.role === "user" ? "user" : "assistant";
+              const itemId = item.itemId || `${role}-${Date.now()}`;
+              const uniqueKey = `${role}-${itemId}`;
 
-          // Handle different event types
-          if (event.type === "conversation.item.created") {
-            const item = event.item;
-            if (item.type === "message" && item.role) {
-              // Extract text content if available
+              // Skip if already processed
+              if (existingIds.has(uniqueKey)) {
+                return;
+              }
+
+              // Handle both text and audio content
+              let text = "";
               if (item.content && Array.isArray(item.content)) {
-                const textContent = item.content.find(
-                  (c: any) => c.type === "text"
-                );
-                if (textContent && textContent.text) {
-                  setTranscripts((prev) => [
-                    ...prev,
-                    {
-                      role: item.role,
-                      text: textContent.text,
-                      timestamp: Date.now(),
-                    },
-                  ]);
+                item.content.forEach((contentItem: any) => {
+                  if (contentItem.type === "input_text") {
+                    text = contentItem.text;
+                  } else if (contentItem.type === "output_text") {
+                    text = contentItem.text;
+                  } else if (
+                    contentItem.type === "input_audio" &&
+                    contentItem.transcript
+                  ) {
+                    text = contentItem.transcript;
+                  }
+                });
+              }
+
+              // Only add if we have text content
+              if (text && text.trim().length > 0) {
+                newTranscripts.push({
+                  role: role as "user" | "assistant",
+                  text: text.trim(),
+                  timestamp: Date.now(),
+                });
+
+                // Track questions asked by AI
+                if (role === "assistant") {
+                  questionsAdded++;
                 }
+
+                existingIds.add(uniqueKey);
               }
             }
-          } else if (event.type === "response.audio_transcript.done") {
-            // Assistant's spoken response transcript
-            if (event.transcript) {
-              setTranscripts((prev) => [
-                ...prev,
-                {
-                  role: "assistant",
-                  text: event.transcript,
-                  timestamp: Date.now(),
-                },
-              ]);
-            }
-          } else if (
-            event.type ===
-            "conversation.item.input_audio_transcription.completed"
-          ) {
-            // User's spoken input transcript
-            if (event.transcript) {
-              setTranscripts((prev) => [
-                ...prev,
-                {
-                  role: "user",
-                  text: event.transcript,
-                  timestamp: Date.now(),
-                },
-              ]);
-            }
+          });
+
+          // Update question count if new AI messages were added
+          if (questionsAdded > 0) {
+            setQuestionCount((prev) => prev + questionsAdded);
           }
-        } catch (err) {
-          console.error("Error parsing data channel message:", err);
-        }
-      };
 
-      dc.onerror = (err) => {
-        console.error("Data channel error:", err);
-      };
-
-      // Create and send SDP offer
-      console.log("📤 Creating offer...");
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      // Send offer to OpenAI Realtime API
-      console.log("📡 Connecting to OpenAI Realtime API...");
-      const baseUrl =
-        "https://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01";
-      const sdpResponse = await fetch(baseUrl, {
-        method: "POST",
-        body: offer.sdp,
-        headers: {
-          Authorization: `Bearer ${data.client_secret.value}`,
-          "Content-Type": "application/sdp",
-        },
+          return newTranscripts;
+        });
       });
 
-      if (!sdpResponse.ok) {
-        throw new Error(
-          `OpenAI API error: ${sdpResponse.status} ${sdpResponse.statusText}`
-        );
-      }
+      // Handle interruptions (user speaking over agent)
+      session.on("audio_interrupted", () => {
+        console.log("🛑 [INTERRUPT] User interrupted agent");
+        setIsListening(true);
+      }) as any;
 
-      const answerSdp = await sdpResponse.text();
-      const answer: RTCSessionDescriptionInit = {
-        type: "answer",
-        sdp: answerSdp,
-      };
+      // Handle session state changes
+      (session.on as any)("session.updated", () => {
+        console.log("✅ [SESSION] Connected and ready for voice interaction");
+        setConnected(true);
+        setConnecting(false);
+        setIsListening(true);
+      });
 
-      await pc.setRemoteDescription(answer);
-      console.log("✅ WebRTC connection established");
-    } catch (err: any) {
-      console.error("❌ Error starting session:", err);
-      setError(
-        err.message ||
-          "Failed to start session. Please check your API key and try again."
+      // Handle errors
+      (session.on as any)("error", (_error: any) => {
+        console.error("❌ [ERROR]", _error);
+        setError(_error?.message || "Connection error");
+        setConnected(false);
+      });
+
+      // Handle session end
+      (session.on as any)("session.ended", () => {
+        console.log("🏁 [SESSION] Session ended");
+        setConnected(false);
+        setIsListening(false);
+        setConversationEnded(true);
+      });
+
+      // Handle tool approval if needed
+      (session.on as any)(
+        "tool_approval_requested",
+        (_context: any, _agent: any, request: any) => {
+          console.log("🔔 [APPROVAL] Tool approval requested:", request);
+          // Auto-approve for medical tools
+          (session.approve as any)(request.approvalItem);
+        }
       );
+
+      console.log("✅ [READY] Voice agent initialized and ready");
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.error("❌ [INIT ERROR]", errorMsg);
+      setError(errorMsg);
       setConnecting(false);
       setConnected(false);
     }
   };
 
-  // Fetch RAG context continuously (every 3 seconds if there's new content)
-  const fetchRAGContext = async (query: string) => {
-    if (query === lastRagQuery.current) {
-      return;
-    }
+  const endConversation = async () => {
+    console.log("🛑 [END] Ending conversation...");
+    setGeneratingSummary(true);
 
     try {
-      setRagLoading(true);
-      lastRagQuery.current = query;
-
-      console.log("🔍 Fetching RAG context for:", query);
-      const response = await axios.post("http://localhost:3001/rag", {
-        query,
-        k: 3,
-      });
-
-      setRagContext(response.data);
-      console.log("✅ RAG context retrieved:", response.data.sources);
-    } catch (err: any) {
-      console.error("❌ Failed to fetch RAG context:", err);
-      // Silently fail, don't break the experience
-    } finally {
-      setRagLoading(false);
-    }
-  };
-
-  // Auto-fetch RAG context from latest user message
-  useEffect(() => {
-    console.log(
-      "RAG Effect triggered - connected:",
-      connected,
-      "transcripts:",
-      transcripts.length
-    );
-
-    if (!connected) {
-      console.log("Not connected, skipping RAG");
-      return;
-    }
-
-    const userTranscripts = transcripts.filter((t) => t.role === "user");
-    if (userTranscripts.length === 0) {
-      console.log("No user transcripts yet");
-      return;
-    }
-
-    const lastUserMessage = userTranscripts[userTranscripts.length - 1];
-    console.log("Last user message:", lastUserMessage.text);
-
-    // Debounced RAG fetch
-    if (ragDebounceTimer.current) {
-      clearTimeout(ragDebounceTimer.current);
-    }
-
-    ragDebounceTimer.current = setTimeout(() => {
-      console.log("Debounce timeout fired, fetching RAG");
-      fetchRAGContext(lastUserMessage.text);
-    }, 500); // Wait 500ms after user stops typing to fetch RAG
-
-    return () => {
-      if (ragDebounceTimer.current) {
-        clearTimeout(ragDebounceTimer.current);
+      // Close the session
+      if (sessionRef.current) {
+        console.log("🔌 [END] Closing WebRTC session...");
+        await sessionRef.current.close();
       }
-    };
-  }, [transcripts, connected]);
 
-  // Check for conversation ending
-  useEffect(() => {
-    console.log(
-      "End detection effect - conversationEnded:",
-      conversationEnded,
-      "transcripts:",
-      transcripts.length
-    );
+      // Stop microphone
+      if (mediaStreamRef.current) {
+        console.log("🎤 [END] Stopping microphone...");
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
 
-    if (transcripts.length < 4 || conversationEnded) {
-      console.log(
-        "Skipping end detection - too few transcripts or already ended"
-      );
-      return;
-    }
+      // Generate summary if not already generated
+      if (!medicalSummary && transcripts.length > 0) {
+        console.log("📝 [END] Auto-generating medical summary...");
+        try {
+          const response = await fetch("http://localhost:3001/summary", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ transcripts }),
+          });
 
-    const lastAssistantMessage = [...transcripts]
-      .reverse()
-      .find((t) => t.role === "assistant");
+          if (response.ok) {
+            const data = await response.json();
+            setMedicalSummary({
+              summary: data.summary,
+              generated_at: data.generated_at,
+            });
+            console.log("✅ [END] Medical summary auto-generated");
+          } else {
+            console.error(
+              "❌ [END] Failed to auto-generate summary:",
+              response.status
+            );
+          }
+        } catch (error) {
+          console.error("❌ [END] Error auto-generating summary:", error);
+        }
+      }
 
-    if (!lastAssistantMessage) {
-      console.log("No assistant message found");
-      return;
-    }
-
-    console.log(
-      "Checking assistant message for end keywords:",
-      lastAssistantMessage.text
-    );
-
-    if (isConversationEnding(lastAssistantMessage.text)) {
-      console.log("🏁 Conversation ending detected!");
+      // Mark conversation as ended
       setConversationEnded(true);
-      // Automatically generate summary
-      setTimeout(() => {
-        console.log("Auto-generating summary now...");
-        generateSummary();
-      }, 1000); // Wait 1 second then generate
-    }
-  }, [transcripts, conversationEnded]);
-
-  // Generate medical summary
-  const generateSummary = async () => {
-    try {
-      setGeneratingSummary(true);
-      console.log(
-        "📋 Generating medical summary from",
-        transcripts.length,
-        "messages..."
-      );
-
-      const response = await axios.post("http://localhost:3001/summary", {
-        transcripts,
-      });
-
-      console.log("✅ Summary response received:", response.data);
-      setMedicalSummary(response.data);
-      console.log("✅ Medical summary generated");
-    } catch (err: any) {
-      console.error("❌ Failed to generate summary:", err);
-      console.error("Error details:", err.response?.data || err.message);
-      setError("Failed to generate medical summary. Try again.");
-      setConversationEnded(false); // Reset so user can try again
+      setConnected(false);
+      setConnectionStatus("✅ Conversation Ended");
+      console.log("✅ [END] Conversation ended successfully");
+    } catch (error) {
+      console.error("❌ [END] Error ending conversation:", error);
+      setError(`Error ending conversation: ${error}`);
+      setConversationEnded(true);
     } finally {
       setGeneratingSummary(false);
     }
   };
 
-  const endConversation = async () => {
-    disconnect();
-    // Generate summary after ending
-    await generateSummary();
+  const startNewSession = () => {
+    console.log("🔄 [NEW] Starting new session...");
+    setTranscripts([]);
+    setMedicalSummary(null);
+    setConversationEnded(false);
+    setError("");
+    initializeAgent();
   };
 
-  const disconnect = () => {
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
+  const copyToClipboard = () => {
+    if (medicalSummary) {
+      navigator.clipboard.writeText(medicalSummary.summary);
+      alert("✅ Summary copied to clipboard!");
     }
-    if (dataChannelRef.current) {
-      dataChannelRef.current.close();
-      dataChannelRef.current = null;
-    }
-    setConnected(false);
-    setIsListening(false);
-    setRagContext(null);
   };
 
   useEffect(() => {
-    // Cleanup on unmount
     return () => {
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
+      if (sessionRef.current) {
+        sessionRef.current.close();
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
   }, []);
 
   return (
-    <div className="app">
-      <div className="container">
-        <header className="header">
-          <h1>🩺 HealthYoda</h1>
-          <p className="subtitle">AI Medical Assistant with RAG</p>
-        </header>
+    <div className="app-container">
+      <header className="app-header">
+        <h1>🏥 HealthYoda - AI Medical Interview Assistant</h1>
+        <p>Speech-to-Speech Voice Agent with Real-Time RAG Integration</p>
+      </header>
 
-        <div className="status-section">
-          {!connected && !connecting && !medicalSummary && (
-            <button className="connect-btn" onClick={startSession}>
-              Start Conversation
-            </button>
-          )}
+      <main className="app-main">
+        {error && (
+          <div className="error-banner">
+            <strong>⚠️ Error:</strong> {error}
+          </div>
+        )}
 
-          {connecting && (
-            <div className="status connecting">
-              <div className="spinner"></div>
-              <p>Connecting to assistant...</p>
-            </div>
-          )}
-
-          {connected && (
-            <div className="status connected">
-              <div className="pulse"></div>
-              <p>Connected - Speak now</p>
-              <span className="rag-badge">🧠 RAG Active</span>
-              {conversationEnded ? (
-                <p className="ending-indicator">
-                  ⏱️ Conversation ended - generating summary...
-                </p>
-              ) : (
-                <button className="disconnect-btn" onClick={endConversation}>
-                  End Conversation & Generate Summary
-                </button>
-              )}
-            </div>
-          )}
-
-          {error && (
-            <div className="error">
-              <p>⚠️ {error}</p>
-            </div>
-          )}
-        </div>
-
-        {medicalSummary ? (
-          <div className="summary-section">
-            <h2>📋 Medical Summary Report</h2>
-            <div className="summary-content">
-              <div className="summary-text">
-                {medicalSummary.summary.split("\n\n").map((paragraph, idx) => (
-                  <p key={idx}>{paragraph}</p>
-                ))}
-              </div>
-              <div className="summary-footer">
-                <p className="meta">
-                  Generated from {medicalSummary.transcripts_count} messages |{" "}
-                  {new Date(medicalSummary.generated_at).toLocaleString()}
-                </p>
-                <button
-                  className="copy-btn"
-                  onClick={() => {
-                    navigator.clipboard.writeText(medicalSummary.summary);
-                    alert("Summary copied to clipboard!");
-                  }}
-                >
-                  📋 Copy Summary
-                </button>
-                <button
-                  className="new-session-btn"
-                  onClick={() => window.location.reload()}
-                >
-                  ➕ Start New Session
-                </button>
-              </div>
+        {/* NEW: Connection Status Panel */}
+        {connecting && (
+          <div className="status-panel">
+            <div className="status-panel-title">🔧 System Status</div>
+            <div className="status-item">
+              <span className="status-label">Connection:</span>
+              <span className="status-value">{connectionStatus}</span>
             </div>
           </div>
-        ) : connected ? (
-          <div className="main-content">
-            <div className="transcript-section">
-              <h2>Conversation</h2>
-              <div className="transcript-container">
+        )}
+
+        {connected && !conversationEnded && (
+          <div className="status-panel">
+            <div className="status-panel-title">📊 Interview Status</div>
+            <div className="status-item">
+              <span className="status-label">Connection:</span>
+              <span className="status-value">✅ {connectionStatus}</span>
+            </div>
+            <div className="status-item">
+              <span className="status-label">Questions Asked:</span>
+              <span className="status-value">{questionCount}</span>
+            </div>
+            {ragStatus && (
+              <div className="status-item">
+                <span className="status-label">Medical Framework:</span>
+                <span className="status-value">{ragStatus}</span>
+              </div>
+            )}
+            {ragDetails && (
+              <div className="status-item rag-details">
+                <div>
+                  <strong>📚 RAG Details:</strong>
+                </div>
+                <div className="rag-info">
+                  <small>
+                    Symptom: <strong>{ragDetails.symptom}</strong>
+                  </small>
+                </div>
+                <div className="rag-info">
+                  <small>
+                    Chunks: <strong>{ragDetails.chunks}</strong> | Sources:{" "}
+                    <strong>{ragDetails.sources.join(", ")}</strong>
+                  </small>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!connected && !conversationEnded && (
+          <div className="start-section">
+            <button
+              onClick={initializeAgent}
+              disabled={connecting}
+              className="primary-button"
+            >
+              {connecting ? "🔗 Connecting..." : "🎙️ Start Voice Interview"}
+            </button>
+            <p className="help-text">
+              Click to start. Allow microphone access when prompted. Speak
+              naturally about your health concern.
+            </p>
+          </div>
+        )}
+
+        {connected && (
+          <div className="conversation-section">
+            <div className="status-indicator">
+              <div
+                className={`status-dot ${isListening ? "listening" : ""}`}
+              ></div>
+              <span>
+                {isListening ? "🎤 Listening..." : "⏸️ Processing..."}
+              </span>
+            </div>
+
+            <div className="transcript-container">
+              <h2>📋 Conversation</h2>
+              <div className="transcript-list">
                 {transcripts.length === 0 ? (
                   <p className="empty-state">
-                    {isListening
-                      ? "Listening... Start speaking to begin the conversation."
-                      : "No conversation yet."}
+                    Waiting for you to speak. Describe your health concern...
                   </p>
                 ) : (
-                  transcripts.map((item, index) => (
-                    <div key={index} className={`transcript-item ${item.role}`}>
-                      <div className="role-badge">
-                        {item.role === "user" ? "You" : "HealthYoda"}
-                      </div>
-                      <div className="text">{item.text}</div>
+                  transcripts.map((item, idx) => (
+                    <div key={idx} className={`transcript-item ${item.role}`}>
+                      <strong>
+                        {item.role === "user" ? "👤 You" : "🤖 HealthYoda"}:
+                      </strong>
+                      <p>{item.text}</p>
                     </div>
                   ))
                 )}
               </div>
             </div>
 
-            {showRagPanel && (
-              <div className="rag-section">
-                <div className="rag-header">
-                  <h2>📚 Medical Knowledge Context</h2>
-                </div>
+            <button onClick={endConversation} className="end-button">
+              ✋ End Interview
+            </button>
+          </div>
+        )}
 
-                {ragLoading && (
-                  <div className="rag-loading">
-                    <div className="spinner-small"></div>
-                    <p>Retrieving relevant medical framework...</p>
-                  </div>
-                )}
+        {conversationEnded && medicalSummary && (
+          <div className="summary-section">
+            <h2>📋 Medical Summary Report</h2>
+            <div className="summary-content">
+              <pre>{medicalSummary.summary}</pre>
+            </div>
+            <div className="summary-actions">
+              <button onClick={copyToClipboard} className="copy-button">
+                📋 Copy Report
+              </button>
+              <button onClick={startNewSession} className="new-session-button">
+                🔄 New Interview
+              </button>
+            </div>
+          </div>
+        )}
 
-                {ragContext && !ragLoading && (
-                  <div className="rag-content">
-                    <div className="rag-sources">
-                      <strong>Sources:</strong> {ragContext.sources.join(" • ")}
-                    </div>
-                    <div className="rag-text">
-                      {ragContext.context
-                        .split("\n\n---\n\n")
-                        .map((section, idx) => (
-                          <div key={idx} className="rag-chunk">
-                            {section.split("\n").map((line, lineIdx) => (
-                              <p key={lineIdx}>{line}</p>
-                            ))}
-                          </div>
-                        ))}
-                    </div>
-                    <div className="rag-note">
-                      ℹ️ This context helps guide evidence-based questions for
-                      comprehensive history-taking.
-                    </div>
-                  </div>
-                )}
+        {conversationEnded && !medicalSummary && (
+          <div className="summary-section">
+            <h2>📋 Medical Summary Report</h2>
+            {generatingSummary ? (
+              <div className="loading-indicator">
+                <p>⏳ Generating medical summary from conversation...</p>
+              </div>
+            ) : (
+              <div className="summary-placeholder">
+                <p>📝 No summary available yet.</p>
+                <p>This can happen if the conversation was very brief.</p>
+                <button
+                  onClick={startNewSession}
+                  className="new-session-button"
+                >
+                  🔄 Start New Interview
+                </button>
               </div>
             )}
           </div>
-        ) : null}
+        )}
 
-        <footer className="footer">
-          <p>🔒 Your conversation is secure and private</p>
-          <p className="disclaimer">
-            Note: This is an AI assistant for information gathering only. Always
-            consult with a healthcare professional for medical advice.
-          </p>
-        </footer>
-      </div>
+        {generatingSummary && (
+          <div className="loading-indicator">
+            <p>⏳ Generating medical summary...</p>
+          </div>
+        )}
+      </main>
+
+      <footer className="app-footer">
+        <p>
+          HealthYoda is an AI-powered medical intake assistant using
+          speech-to-speech technology with real-time RAG knowledge retrieval.
+          <br />
+          <strong>Disclaimer:</strong> This is an information-gathering tool
+          only. Always consult with a licensed healthcare provider for medical
+          advice, diagnosis, or treatment.
+        </p>
+      </footer>
     </div>
   );
 }
