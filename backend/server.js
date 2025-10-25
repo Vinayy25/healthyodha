@@ -21,8 +21,57 @@ if (!OPENAI_API_KEY) {
   process.exit(1);
 }
 
+// Store conversation context for each session
+const conversationContexts = new Map();
+
+// Helper function to build system instructions with RAG context
+function buildSystemInstructions(ragContext = null) {
+  let instructions = `You are HealthYoda, a compassionate and professional medical assistant. Your role is to interview patients to gather their medical history in a conversational and empathetic manner.
+
+Guidelines:
+- Be warm, patient, and understanding
+- Ask one question at a time
+- Listen actively and acknowledge patient concerns
+- Ask follow-up questions to get detailed information
+- Focus on: chief complaint, onset, duration, quality, severity, aggravating/relieving factors, and associated symptoms
+- Do NOT provide diagnoses or medical advice
+- Do NOT prescribe treatments
+- Maintain patient privacy and confidentiality
+- If the patient seems to be in distress, advise them to seek immediate medical attention`;
+
+  if (ragContext) {
+    instructions += `
+
+IMPORTANT - MEDICAL KNOWLEDGE FRAMEWORK:
+You have access to the following medical knowledge framework that you MUST use to guide your questions:
+
+${ragContext}
+
+Use this framework to ask evidence-based, medically appropriate follow-up questions in this specific sequence:
+1. Onset/Duration - When did symptoms start? Are they constant or intermittent?
+2. Quality/Severity - What does it feel like? How severe (scale 1-10)?
+3. Aggravating/Relieving - What makes it better or worse?
+4. Associated Symptoms - Any other symptoms present?
+5. Red Flags - Any danger signs like chest pain, difficulty breathing, etc.?
+6. Context - Medical history relevant to this condition?
+
+Ask questions naturally following this framework. Reference the possible answers to listen for specific details.`;
+  }
+
+  instructions += `
+
+Start by greeting the patient warmly and asking how you can help them today.`;
+
+  return instructions;
+}
+
+// Regular session endpoint (initial greeting only)
 app.post("/session", async (req, res) => {
   try {
+    const instructions = buildSystemInstructions();
+
+    console.log("📝 Creating session with initial instructions");
+
     const response = await fetch(
       "https://api.openai.com/v1/realtime/sessions",
       {
@@ -34,27 +83,7 @@ app.post("/session", async (req, res) => {
         body: JSON.stringify({
           model: "gpt-4o-realtime-preview-2024-10-01",
           voice: "alloy",
-          instructions: `You are HealthYoda, a compassionate and professional medical assistant. Your role is to interview patients to gather their medical history in a conversational and empathetic manner.
-
-Guidelines:
-- Be warm, patient, and understanding
-- Ask one question at a time
-- Listen actively and acknowledge patient concerns
-- Ask follow-up questions to get detailed information
-- Focus on: chief complaint, onset, duration, quality, severity, aggravating/relieving factors, and associated symptoms
-- Do NOT provide diagnoses or medical advice
-- Do NOT prescribe treatments
-- Maintain patient privacy and confidentiality
-- If the patient seems to be in distress, advise them to seek immediate medical attention
-
-IMPORTANT - RAG-ENHANCED FOLLOW-UP QUESTIONS:
-- After the patient's first response, EVERY follow-up question should be based on the medical knowledge base provided in the context.
-- The context provides evidence-based question frameworks from medical handbooks.
-- Use the provided context to ask optimal, medically appropriate follow-up questions.
-- Structure your questions following the frameworks: Onset/Duration → Quality/Severity → Aggravating/Relieving → Associated Symptoms → Red Flags.
-- Reference the "Possible Answers" in the context to understand what you're listening for.
-
-Start by greeting the patient warmly and asking how you can help them today.`,
+          instructions: instructions,
         }),
       }
     );
@@ -68,7 +97,95 @@ Start by greeting the patient warmly and asking how you can help them today.`,
     }
 
     const data = await response.json();
+
+    // Store empty context for this session
+    conversationContexts.set(data.client_secret.client_secret, {
+      ragContext: null,
+      transcript: [],
+    });
+
+    console.log("✅ Session created:", data.client_secret.client_secret);
     res.json(data);
+  } catch (error) {
+    console.error("Server error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// NEW: Session endpoint with RAG context (for follow-up conversations)
+app.post("/session-with-context", async (req, res) => {
+  try {
+    const { userMessage } = req.body;
+
+    if (!userMessage) {
+      return res.status(400).json({ error: "userMessage is required" });
+    }
+
+    console.log(`📚 Creating session with RAG context for: "${userMessage}"`);
+
+    // Get RAG context
+    const ragResponse = await fetch(`${RAG_SERVICE_URL}/rag`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: userMessage, k: 2 }),
+    });
+
+    let ragContext = "";
+    if (ragResponse.ok) {
+      const ragData = await ragResponse.json();
+      ragContext = ragData.context || "";
+      console.log("✅ RAG context retrieved:", ragData.sources);
+    } else {
+      console.warn("⚠️  Could not retrieve RAG context, continuing without it");
+    }
+
+    // Build instructions with RAG context
+    const instructions = buildSystemInstructions(ragContext);
+
+    // Create session with RAG-enhanced instructions
+    const sessionResponse = await fetch(
+      "https://api.openai.com/v1/realtime/sessions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-realtime-preview-2024-10-01",
+          voice: "alloy",
+          instructions: instructions,
+        }),
+      }
+    );
+
+    if (!sessionResponse.ok) {
+      const error = await sessionResponse.text();
+      console.error("OpenAI API Error:", error);
+      return res
+        .status(sessionResponse.status)
+        .json({ error: "Failed to create session" });
+    }
+
+    const sessionData = await sessionResponse.json();
+    const sessionId = sessionData.client_secret.client_secret;
+
+    // Store context and transcript for this session
+    conversationContexts.set(sessionId, {
+      ragContext: ragContext,
+      userMessage: userMessage,
+      sources: ragResponse.ok ? (await ragResponse.json()).sources : [],
+      transcript: [],
+    });
+
+    console.log("✅ RAG-enhanced session created:", sessionId);
+    res.json({
+      ...sessionData,
+      ragContext: {
+        available: ragContext.length > 0,
+        sources: conversationContexts.get(sessionId).sources,
+      },
+    });
   } catch (error) {
     console.error("Server error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -103,36 +220,24 @@ app.post("/rag", async (req, res) => {
     }
 
     const ragData = await ragResponse.json();
-    console.log(`✅ Retrieved ${ragData.num_chunks} relevant chunks`);
-
+    console.log(
+      `✅ RAG Response: ${ragData.num_chunks} chunks from ${ragData.sources.length} sources`
+    );
     res.json(ragData);
   } catch (error) {
-    console.error("RAG endpoint error:", error);
-
-    // Check if RAG service is running
-    if (error.code === "ECONNREFUSED") {
-      return res.status(503).json({
-        error: "RAG service not running",
-        message:
-          "Please start the RAG service: cd rag_service && uvicorn main:app --port 3000",
-      });
-    }
-
-    res.status(500).json({ error: "Failed to retrieve context" });
+    console.error("RAG error:", error);
+    res.status(500).json({ error: "RAG service error" });
   }
 });
 
-// Check if RAG service is available
+// RAG health check
 app.get("/rag/health", async (req, res) => {
   try {
     const healthResponse = await fetch(`${RAG_SERVICE_URL}/health`);
     const data = await healthResponse.json();
     res.json({ status: "connected", ...data });
   } catch (error) {
-    res.status(503).json({
-      status: "disconnected",
-      message: "RAG service not available",
-    });
+    res.status(500).json({ status: "disconnected", error: error.message });
   }
 });
 
