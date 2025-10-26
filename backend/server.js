@@ -8,21 +8,29 @@ dotenv.config({ path: "../.env" });
 const app = express();
 
 // CORS configuration - allow all origins for now
-app.use(cors({
-  origin: '*', // Allow all origins
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
+app.use(
+  cors({
+    origin: "*", // Allow all origins
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
 
 app.use(express.json());
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || "http://localhost:3000";
+const REALTIME_MODEL = process.env.REALTIME_MODEL || "gpt-realtime";
+const SUMMARY_MODEL = process.env.SUMMARY_MODEL || "gpt-4o-mini";
+const PORT = process.env.PORT || 3001;
 
 console.log("📋 Configuration:");
 console.log(`   OPENAI_API_KEY: ${OPENAI_API_KEY ? "✅ Set" : "❌ Missing"}`);
 console.log(`   RAG_SERVICE_URL: ${RAG_SERVICE_URL}`);
+console.log(`   REALTIME_MODEL: ${REALTIME_MODEL}`);
+console.log(`   SUMMARY_MODEL: ${SUMMARY_MODEL}`);
+console.log(`   PORT: ${PORT}`);
 
 if (!OPENAI_API_KEY) {
   console.error("❌ OPENAI_API_KEY not found in environment variables");
@@ -89,7 +97,7 @@ app.get("/session", async (req, res) => {
         body: JSON.stringify({
           session: {
             type: "realtime",
-            model: "gpt-realtime",
+            model: REALTIME_MODEL,
           },
         }),
       }
@@ -131,7 +139,7 @@ app.get("/client-secret", async (req, res) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "gpt-realtime-mini-2025-10-06",
+          model: REALTIME_MODEL,
         }),
       }
     );
@@ -310,7 +318,7 @@ app.post("/summary", async (req, res) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
+          model: SUMMARY_MODEL,
           messages: [
             {
               role: "system",
@@ -373,7 +381,6 @@ Keep it concise, professional, and suitable for a physician's review.`,
   }
 });
 
-const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`✅ HealthYoda Backend running on port ${PORT}`);
   console.log(`📡 Session endpoint: http://localhost:${PORT}/session`);

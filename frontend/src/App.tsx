@@ -3,6 +3,11 @@ import { RealtimeAgent, tool, RealtimeSession } from "@openai/agents/realtime";
 import { z } from "zod";
 import "./App.css";
 
+// Environment configuration
+const BACKEND_URL =
+  import.meta.env.VITE_BACKEND_URL || "https://healthyodha-y754.vercel.app";
+const REALTIME_MODEL = import.meta.env.VITE_REALTIME_MODEL || "gpt-realtime";
+
 interface TranscriptItem {
   role: "user" | "assistant";
   text: string;
@@ -57,14 +62,11 @@ function App() {
       console.log(`🔍 [TOOL] Retrieving medical framework for: "${symptom}"`);
       setRagStatus("Fetching medical framework from backend...");
       try {
-        const response = await fetch(
-          "https://healthyodha-y754.vercel.app/rag",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query: symptom, k: 2 }),
-          }
-        );
+        const response = await fetch(`${BACKEND_URL}/rag`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: symptom, k: 2 }),
+        });
 
         if (!response.ok) {
           throw new Error(`RAG service error: ${response.status}`);
@@ -122,14 +124,11 @@ function App() {
       );
       setGeneratingSummary(true);
       try {
-        const response = await fetch(
-          "https://healthyodha-y754.vercel.app/summary",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ transcripts }),
-          }
-        );
+        const response = await fetch(`${BACKEND_URL}/summary`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcripts }),
+        });
 
         if (!response.ok) {
           throw new Error(`Summary service error: ${response.status}`);
@@ -264,9 +263,7 @@ Start by greeting warmly and asking their main concern.`,
 
       console.log("🔑 [AUTH] Requesting ephemeral token from backend...");
       setConnectionStatus("Requesting session token from backend...");
-      const tokenResponse = await fetch(
-        "https://healthyodha-y754.vercel.app/session"
-      );
+      const tokenResponse = await fetch(`${BACKEND_URL}/session`);
       if (!tokenResponse.ok) {
         throw new Error("Failed to get session token");
       }
@@ -275,7 +272,7 @@ Start by greeting warmly and asking their main concern.`,
 
       console.log("📡 [CONNECTION] Creating RealtimeSession...");
       const session = new RealtimeSession(agent, {
-        model: "gpt-realtime",
+        model: REALTIME_MODEL,
       });
 
       console.log("🔗 [WEBRTC] Connecting to OpenAI Realtime API...");
@@ -455,14 +452,11 @@ Start by greeting warmly and asking their main concern.`,
       if (!medicalSummary && transcripts.length > 0) {
         console.log("📝 [END] Auto-generating medical summary...");
         try {
-          const response = await fetch(
-            "https://healthyodha-y754.vercel.app/summary",
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ transcripts }),
-            }
-          );
+          const response = await fetch(`${BACKEND_URL}/summary`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ transcripts }),
+          });
 
           if (response.ok) {
             const data = await response.json();
