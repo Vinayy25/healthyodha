@@ -131,7 +131,7 @@ app.get("/client-secret", async (req, res) => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "gpt-4o-realtime-preview-2024-10-01",
+          model: "gpt-realtime-mini-2025-10-06",
         }),
       }
     );
